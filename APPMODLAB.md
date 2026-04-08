@@ -1,11 +1,19 @@
 ---
 title: "Agentic CI/CD Pipeline"
-category: "Cross-Cutting / End-to-End"
-priority: "P3"
-languages: ["GitHub Actions", "YAML", "TypeScript"]
-duration: "4-6 hours"
-repository: "appmodlab-agentic-cicd-pipeline"
-organization: "EmeaAppGbb"
+description: "SQUAD-powered CI/CD with risk assessment, release notes, and health monitoring"
+authors: ["marconsilva"]
+category: "Agentic Software Development"
+industry: "Cross-Industry"
+services: []
+languages: ["TypeScript"]
+frameworks: ["React", "Hono", "Drizzle ORM", "PostgreSQL", "Redis", "Vite"]
+modernizationTools: []
+agenticTools: ["SQUAD"]
+tags: ["cicd", "github-actions", "deployment-automation", "risk-assessment", "auto-rollback"]
+extensions: ["github.copilot"]
+thumbnail: ""
+video: ""
+version: "1.0.0"
 ---
 
 # Agentic CI/CD Pipeline
