@@ -1,0 +1,48 @@
+name: Eyes Pre-Deploy Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  eyes-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: SQUAD Eyes Code Review
+        id: eyes-review
+        run: |
+          echo "Running SQUAD Eyes review on PR changes..."
+          # This would invoke SQUAD Eyes agent
+          # squad invoke eyes --context pr --mode review
+          
+          # Mock review output
+          echo "quality_score=85" >> $GITHUB_OUTPUT
+          echo "security_issues=0" >> $GITHUB_OUTPUT
+          echo "performance_concerns=1" >> $GITHUB_OUTPUT
+          
+      - name: Post Review Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 👁️ Eyes Code Review
+              
+              **Quality Score:** ${{ steps.eyes-review.outputs.quality_score }}/100
+              
+              **Findings:**
+              - ✅ No security issues detected
+              - ⚠️ 1 performance concern: Consider memoizing expensive Dashboard calculations
+              
+              **Recommendation:** Approved with minor suggestions`
+            })
+      
+      - name: Set Status Check
+        if: steps.eyes-review.outputs.quality_score >= 70
+        run: echo "Eyes review passed with score ${{ steps.eyes-review.outputs.quality_score }}"

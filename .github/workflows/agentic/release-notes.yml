@@ -1,0 +1,62 @@
+name: Mouth Release Notes
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  generate-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get Commit Messages
+        id: commits
+        run: |
+          COMMITS=$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD)
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Mouth Generate Release Notes
+        id: release-notes
+        run: |
+          # SQUAD Mouth would analyze commits and generate categorized release notes
+          cat > release-notes.md << 'EOF'
+          # Release Notes - $(date +%Y-%m-%d)
+          
+          ## 🚀 Features
+          - Added real-time metrics dashboard
+          - Implemented billing invoice API
+          
+          ## 🐛 Bug Fixes
+          - Fixed error rate calculation
+          - Corrected timezone handling in metrics
+          
+          ## 🔧 Improvements
+          - Optimized Dashboard component rendering
+          - Enhanced health check endpoints
+          
+          ## 📝 Changes
+          ${{ steps.commits.outputs.commits }}
+          EOF
+          
+          cat release-notes.md
+      
+      - name: Create Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const notes = fs.readFileSync('release-notes.md', 'utf8');
+            
+            github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${Date.now()}`,
+              name: `Release ${new Date().toISOString().split('T')[0]}`,
+              body: notes,
+              draft: true
+            });

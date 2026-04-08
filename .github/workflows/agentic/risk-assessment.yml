@@ -1,0 +1,70 @@
+name: Brain Risk Assessment
+
+on:
+  pull_request:
+    types: [labeled, opened, synchronize]
+
+jobs:
+  assess-risk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Analyze Changes
+        id: changes
+        run: |
+          FILES_CHANGED=$(git diff --name-only origin/main...HEAD | wc -l)
+          DB_MIGRATIONS=$(git diff --name-only origin/main...HEAD | grep -c 'migrations/' || true)
+          API_CHANGES=$(git diff --name-only origin/main...HEAD | grep -c 'packages/api/' || true)
+          
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "db_migrations=$DB_MIGRATIONS" >> $GITHUB_OUTPUT
+          echo "api_changes=$API_CHANGES" >> $GITHUB_OUTPUT
+      
+      - name: Brain Risk Assessment
+        id: risk
+        run: |
+          # Risk scoring logic
+          RISK_SCORE=0
+          RISK_SCORE=$((RISK_SCORE + ${{ steps.changes.outputs.files_changed }} / 2))
+          RISK_SCORE=$((RISK_SCORE + ${{ steps.changes.outputs.db_migrations }} * 10))
+          RISK_SCORE=$((RISK_SCORE + ${{ steps.changes.outputs.api_changes }} * 2))
+          
+          if [ $RISK_SCORE -lt 10 ]; then
+            RISK_LEVEL="low"
+          elif [ $RISK_SCORE -lt 25 ]; then
+            RISK_LEVEL="moderate"
+          else
+            RISK_LEVEL="high"
+          fi
+          
+          echo "risk_score=$RISK_SCORE" >> $GITHUB_OUTPUT
+          echo "risk_level=$RISK_LEVEL" >> $GITHUB_OUTPUT
+      
+      - name: Post Risk Assessment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🧠 Brain Risk Assessment
+              
+              **Risk Level:** ${{ steps.risk.outputs.risk_level }} (Score: ${{ steps.risk.outputs.risk_score }})
+              
+              **Analysis:**
+              - Files changed: ${{ steps.changes.outputs.files_changed }}
+              - Database migrations: ${{ steps.changes.outputs.db_migrations }}
+              - API changes: ${{ steps.changes.outputs.api_changes }}
+              
+              **Recommendation:** ${{ steps.risk.outputs.risk_level == 'high' && 'Additional approval required' || 'Standard deployment process' }}`
+            })
+      
+      - name: Require Additional Approval
+        if: steps.risk.outputs.risk_level == 'high'
+        run: |
+          echo "High-risk deployment detected - additional approval required"
+          exit 1

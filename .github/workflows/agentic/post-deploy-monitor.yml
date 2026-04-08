@@ -1,0 +1,76 @@
+name: Ralph Post-Deploy Monitor
+
+on:
+  deployment_status:
+
+jobs:
+  monitor-health:
+    if: github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Deployment Stabilization
+        run: sleep 60
+      
+      - name: Ralph Health Check
+        id: health
+        run: |
+          # Check health endpoint
+          HEALTH_STATUS=$(curl -s https://metricflow-staging.example.com/api/health | jq -r '.status')
+          
+          # Check error rates
+          ERROR_RATE=$(curl -s https://metricflow-staging.example.com/api/metrics/realtime | jq -r '.errorRate')
+          
+          echo "health_status=$HEALTH_STATUS" >> $GITHUB_OUTPUT
+          echo "error_rate=$ERROR_RATE" >> $GITHUB_OUTPUT
+      
+      - name: Evaluate Deployment Health
+        id: evaluate
+        run: |
+          HEALTH="${{ steps.health.outputs.health_status }}"
+          ERROR_RATE="${{ steps.health.outputs.error_rate }}"
+          
+          if [ "$HEALTH" != "healthy" ]; then
+            echo "deployment_healthy=false" >> $GITHUB_OUTPUT
+            echo "reason=Health check failed" >> $GITHUB_OUTPUT
+          elif (( $(echo "$ERROR_RATE > 0.05" | bc -l) )); then
+            echo "deployment_healthy=false" >> $GITHUB_OUTPUT
+            echo "reason=Error rate too high: $ERROR_RATE" >> $GITHUB_OUTPUT
+          else
+            echo "deployment_healthy=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Trigger Rollback
+        if: steps.evaluate.outputs.deployment_healthy == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.setFailed('⚠️ Ralph detected deployment issues: ${{ steps.evaluate.outputs.reason }}');
+            
+            // Trigger rollback workflow
+            github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'rollback.yml',
+              ref: 'main',
+              inputs: {
+                reason: '${{ steps.evaluate.outputs.reason }}'
+              }
+            });
+      
+      - name: Post Success Status
+        if: steps.evaluate.outputs.deployment_healthy == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '✅ Ralph: Deployment Health Check Passed',
+              body: `Deployment monitoring completed successfully.
+              
+              **Health Status:** ${{ steps.health.outputs.health_status }}
+              **Error Rate:** ${{ steps.health.outputs.error_rate }}
+              
+              All metrics within acceptable thresholds.`,
+              labels: ['deployment', 'ralph-monitor']
+            });
