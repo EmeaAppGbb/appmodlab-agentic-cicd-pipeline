@@ -1,0 +1,12 @@
+name: health-monitor
+role: >
+  Monitors Ralph deployment health by polling the health-check endpoint
+  and evaluating key metrics against defined thresholds. Triggers rollback
+  alerts when thresholds are violated.
+
+health_check_url: http://localhost:3000/health
+
+thresholds:
+  error_rate: 0.05        # max acceptable error rate (5 %)
+  response_time: 500      # max acceptable response time in ms
+  health_status: healthy   # expected status value from /health
