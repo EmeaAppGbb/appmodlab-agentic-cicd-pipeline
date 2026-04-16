@@ -1,0 +1,77 @@
+name: Deployment Approval Gates
+
+on:
+  workflow_call:
+    inputs:
+      risk_level:
+        description: "Risk level of the deployment (low, moderate, high)"
+        required: true
+        type: string
+      risk_score:
+        description: "Numeric risk score for the deployment"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  standard-deploy:
+    if: inputs.risk_level == 'low'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Approve standard deployment
+        run: |
+          echo "✅ Risk level: ${{ inputs.risk_level }}"
+          echo "📊 Risk score: ${{ inputs.risk_score }}"
+          echo "Deployment approved — no additional gates required."
+
+  enhanced-monitoring-deploy:
+    if: inputs.risk_level == 'moderate'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Enable enhanced monitoring
+        run: |
+          echo "⚠️ Risk level: ${{ inputs.risk_level }}"
+          echo "📊 Risk score: ${{ inputs.risk_score }}"
+          echo "Enhanced monitoring is enabled for this deployment."
+          echo "Environment: staging"
+
+  high-risk-approval:
+    if: inputs.risk_level == 'high'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Request manual approval
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🚨 High-Risk Deployment Approval Required (score: ${{ inputs.risk_score }})`;
+            const body = [
+              '## Deployment Approval Request',
+              '',
+              '| Detail | Value |',
+              '|--------|-------|',
+              '| **Risk Level** | `${{ inputs.risk_level }}` |',
+              '| **Risk Score** | `${{ inputs.risk_score }}` |',
+              '| **Run ID** | `${{ github.run_id }}` |',
+              '| **Triggered by** | @${{ github.actor }} |',
+              '',
+              'This deployment requires manual approval via the **production** environment protection rules.',
+              '',
+              'Please review the risk details and approve or reject the pending deployment in the',
+              '[Actions run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).'
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['deployment', 'high-risk']
+            });
+
+            console.log('🚨 High-risk deployment — manual approval required.');
+            console.log(`Risk score: ${{ inputs.risk_score }}`);

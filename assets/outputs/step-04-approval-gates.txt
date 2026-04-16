@@ -1,0 +1,34 @@
+ÔùÅ Create workflow directory (shell)
+  Ôöé New-Item -ItemType Directory -Path ".github\workflows\agentic" -Force |
+  Ôöé Out-Null; Write-Output "done"
+  Ôöö 2 lines...
+
+ÔùÅ Create approval-gates.yml +78
+  Ôöö .github\workflows\agentic\approval-gates.yml
+
+Let me validate the YAML syntax:
+
+ÔùÅ Validate YAML syntax (shell)
+  Ôöé python -c "import yaml, sys;
+  Ôöé yaml.safe_load(open(r'.github\workflows\agentic\approval-gates.yml'));
+  Ôöé print('YAML is valid')"
+  Ôöö 2 lines...
+
+ÔùÅ Validate YAML with Node.js (shell)
+  Ôöé node -e "const yaml = require('js-yaml'); const fs = require('fs'); yaml.loa
+  Ôöé d(fs.readFileSync('.github/workflows/agentic/approval-gates.yml','utf8'));
+  Ôöé console.log('YAML is valid')"
+  Ôöö 2 lines...
+
+YAML is valid. Here's a summary of the workflow:
+
+- **Trigger**: `workflow_call` with `risk_level` (string) and `risk_score` (number) inputs
+- **Permissions**: `contents: read`, `issues: write`
+- **`standard-deploy`** ÔÇö runs on `low` risk; logs approval and continues
+- **`enhanced-monitoring-deploy`** ÔÇö runs on `moderate` risk; logs enhanced monitoring, targets `staging` environment
+- **`high-risk-approval`** ÔÇö runs on `high` risk; targets `production` environment (manual approval via protection rules) and creates a GitHub issue with risk details and a link to the Actions run
+
+
+Changes   +78 -0
+Requests  3 Premium (43s)
+Tokens    Ôåæ 133.2k ÔÇó Ôåô 1.4k ÔÇó 113.5k (cached)
