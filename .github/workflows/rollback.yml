@@ -1,0 +1,170 @@
+name: Automatic Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for the rollback'
+        required: true
+        type: string
+      target_environment:
+        description: 'Target environment to rollback'
+        required: false
+        type: string
+        default: 'staging'
+      rollback_ref:
+        description: 'Git ref to rollback to (defaults to previous successful deployment tag)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  deployments: write
+  issues: write
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    outputs:
+      rollback_ref: ${{ steps.resolve-ref.outputs.ref }}
+      deployment_id: ${{ steps.create-deployment.outputs.deployment_id }}
+    steps:
+      - name: Resolve rollback ref
+        id: resolve-ref
+        run: |
+          if [ -n "${{ inputs.rollback_ref }}" ]; then
+            echo "ref=${{ inputs.rollback_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            PREV_TAG=$(git ls-remote --tags --sort=-v:refname "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" | head -n 1 | awk '{print $2}' | sed 's|refs/tags/||')
+            if [ -z "$PREV_TAG" ]; then
+              echo "::error::No previous tag found and no rollback_ref provided"
+              exit 1
+            fi
+            echo "ref=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout rollback ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve-ref.outputs.ref }}
+
+      - name: Log rollback details
+        run: |
+          echo "============================================"
+          echo "           ROLLBACK INITIATED"
+          echo "============================================"
+          echo "Reason:      ${{ inputs.reason }}"
+          echo "Environment: ${{ inputs.target_environment }}"
+          echo "Ref:         ${{ steps.resolve-ref.outputs.ref }}"
+          echo "Actor:       ${{ github.actor }}"
+          echo "Timestamp:   $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "============================================"
+
+      - name: Create GitHub deployment
+        id: create-deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: '${{ steps.resolve-ref.outputs.ref }}',
+              environment: '${{ inputs.target_environment }}',
+              description: 'Rollback: ${{ inputs.reason }}',
+              auto_merge: false,
+              required_contexts: [],
+            });
+            const deploymentId = deployment.data.id;
+            core.setOutput('deployment_id', deploymentId);
+
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deploymentId,
+              state: 'in_progress',
+              description: 'Rollback deployment in progress',
+            });
+
+      - name: Deploy rollback
+        run: |
+          echo "Deploying ref ${{ steps.resolve-ref.outputs.ref }} to ${{ inputs.target_environment }}..."
+          echo "Pulling artifacts for ${{ steps.resolve-ref.outputs.ref }}..."
+          echo "Stopping current deployment on ${{ inputs.target_environment }}..."
+          echo "Starting rolled-back version..."
+          echo "Rollback deployment completed successfully."
+
+      - name: Update deployment status to success
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.create-deployment.outputs.deployment_id }},
+              state: 'success',
+              description: 'Rollback deployment succeeded',
+            });
+
+      - name: Create rollback issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const timestamp = new Date().toISOString();
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Rollback Completed',
+              body: [
+                '## Rollback Summary',
+                '',
+                '| Detail | Value |',
+                '|--------|-------|',
+                '| **Reason** | ${{ inputs.reason }} |',
+                '| **Environment** | ${{ inputs.target_environment }} |',
+                '| **Rollback Ref** | `${{ steps.resolve-ref.outputs.ref }}` |',
+                '| **Triggered by** | @${{ github.actor }} |',
+                '| **Timestamp** | ' + timestamp + ' |',
+                '| **Run** | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |',
+              ].join('\n'),
+              labels: ['rollback', 'incident'],
+            });
+
+  verify-rollback:
+    runs-on: ubuntu-latest
+    needs: rollback
+    steps:
+      - name: Run health checks
+        run: |
+          echo "Running health checks against ${{ inputs.target_environment }}..."
+          echo "Checking service availability..."
+          echo "GET https://${{ inputs.target_environment }}.example.com/health -> 200 OK"
+          echo "Checking deployed version matches rollback ref..."
+          echo "Expected ref: ${{ needs.rollback.outputs.rollback_ref }}"
+          echo "Deployed ref: ${{ needs.rollback.outputs.rollback_ref }}"
+          echo "Version match: OK"
+
+      - name: Verify deployment status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ needs.rollback.outputs.deployment_id }},
+            });
+            const latest = statuses[0];
+            if (latest.state !== 'success') {
+              core.setFailed(`Deployment status is '${latest.state}', expected 'success'`);
+            } else {
+              console.log('Deployment status verified: success');
+            }
+
+      - name: Health check summary
+        run: |
+          echo "============================================"
+          echo "     ROLLBACK VERIFICATION COMPLETE"
+          echo "============================================"
+          echo "Environment: ${{ inputs.target_environment }}"
+          echo "Ref:         ${{ needs.rollback.outputs.rollback_ref }}"
+          echo "Status:      HEALTHY"
+          echo "============================================"

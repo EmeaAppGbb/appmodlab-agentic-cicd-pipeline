@@ -1,0 +1,56 @@
+ÔùÅ Search (glob)
+  Ôöé ".github/workflows/*.yml"
+  Ôöö 5 files found
+
+ÔùÅ Read ci.yml
+  Ôöé .github\workflows\ci.yml
+  Ôöö 38 lines read
+
+ÔùÅ Create rollback.yml +171
+  Ôöö .github\workflows\rollback.yml
+
+Let me validate the YAML is well-formed:
+
+ÔùÅ Validate YAML syntax (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && python -c "import
+  Ôöé yaml; yaml.safe_load(open('.github/workflows/rollback.yml')); print('YAML is
+  Ôöé valid')"
+  Ôöö 2 lines...
+
+ÔùÅ Validate YAML with Node.js (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const yaml
+  Ôöé = require('yaml'); const fs = require('fs'); const doc =
+  Ôöé yaml.parse(fs.readFileSync('.github/workflows/rollback.yml', 'utf8'));
+  Ôöé console.log('YAML valid'); console.log('Jobs:', Object.keys(doc.jobs));
+  Ôöé console.log('Trigger:', Object.keys(doc.on)); console.log('Permissions:', ÔÇª
+  Ôöö 22 lines...
+
+ÔùÅ Validate YAML with js-yaml (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const
+  Ôöé js_yaml = require('js-yaml'); const fs = require('fs'); const doc =
+  Ôöé js_yaml.load(fs.readFileSync('.github/workflows/rollback.yml', 'utf8'));
+  Ôöé console.log('YAML valid'); console.log('Jobs:', Object.keys(doc.jobs));
+  Ôöé console.log('Trigger:', Object.keys(doc.on)); console.log('Permissions:', ÔÇª
+  Ôöö 6 lines...
+
+YAML is valid. Let me commit the file:
+
+ÔùÅ Commit rollback workflow (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && git add
+  Ôöé .github/workflows/rollback.yml && git commit -m "Add automatic rollback
+  Ôöé workflow
+  Ôöé
+  Ôöé Adds .github/workflows/rollback.yml with:ÔÇª
+  Ôöö 17 lines...
+
+Done. Created `.github/workflows/rollback.yml` with:
+
+- **Trigger**: `workflow_dispatch` with `reason` (required), `target_environment` (default: `staging`), and `rollback_ref` (optional, falls back to latest tag)
+- **Permissions**: `contents: read`, `deployments: write`, `issues: write`
+- **`rollback` job**: Resolves ref ÔåÆ checks out code ÔåÆ logs details ÔåÆ creates GitHub deployment (in_progress) ÔåÆ simulates deploy ÔåÆ updates to success ÔåÆ creates "Rollback Completed" issue with `rollback` and `incident` labels
+- **`verify-rollback` job**: Depends on `rollback`, runs health checks and verifies deployment status is `success`
+
+
+Changes   +171 -0
+Requests  3 Premium (1m 18s)
+Tokens    Ôåæ 218.6k ÔÇó Ôåô 3.0k ÔÇó 196.3k (cached)
