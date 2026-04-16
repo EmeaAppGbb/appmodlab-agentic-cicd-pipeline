@@ -1,0 +1,51 @@
+ÔùÅ Read post-deploy-monitor.yml
+  Ôöé .github\workflows\agentic\post-deploy-monitor.yml
+  Ôöö 76 lines read
+
+ÔùÅ Search (glob)
+  Ôöé ".github/workflows/agentic/*.yml"
+  Ôöö 5 files found
+
+Now I'll implement all the enhancements. Let me build the production-quality workflow:
+
+ÔùÅ Edit post-deploy-monitor.yml +203 -37
+  Ôöö .github\workflows\agentic\post-deploy-monitor.yml
+
+Now let me validate the YAML is well-formed:
+
+ÔùÅ Validate YAML syntax (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && python -c "import
+  Ôöé yaml;
+  Ôöé yaml.safe_load(open('.github/workflows/agentic/post-deploy-monitor.yml'));
+  Ôöé print('YAML is valid')"
+  Ôöö 2 lines...
+
+ÔùÅ Validate YAML with Node.js (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const yaml =
+  Ôöé require('js-yaml'); const fs = require('fs'); yaml.load(fs.readFileSync('.gi
+  Ôöé thub/workflows/agentic/post-deploy-monitor.yml','utf8')); console.log('YAML
+  Ôöé is valid')"
+  Ôöö 2 lines...
+
+Let me verify the final file looks correct:
+
+ÔùÅ Read post-deploy-monitor.yml
+  Ôöé .github\workflows\agentic\post-deploy-monitor.yml
+  Ôöö 243 lines read
+
+YAML validates successfully. Here's a summary of all enhancements made:
+
+1. **Permissions block** ÔÇö `contents: read`, `issues: write`, `actions: write`
+2. **`workflow_dispatch` trigger** ÔÇö with `deployment_url` (string) and `environment` (choice: staging/production) inputs; dynamic `DEPLOY_URL`/`DEPLOY_ENV` env vars resolve from inputs or fallback defaults
+3. **Configurable thresholds** ÔÇö 4 env vars: `ERROR_RATE_THRESHOLD`, `RESPONSE_TIME_THRESHOLD`, `HEALTH_CHECK_RETRIES`, `HEALTH_CHECK_INTERVAL`
+4. **Health check with retries** ÔÇö loops N times with configurable interval; tracks pass/fail counts; only marks unhealthy if ALL retries fail
+5. **Response time check** ÔÇö new step averaging 3 curl timing samples (ms)
+6. **Improved evaluation** ÔÇö checks all 3 metrics against thresholds, accumulates multiple failure reasons
+7. **Incident issue on failure** ÔÇö labeled `deployment` + `incident`, with full metrics table and retry details
+8. **Success issue** ÔÇö labeled `deployment-success`, with full health summary
+9. **Rollback step** ÔÇö dispatches `rollback.yml` with reason and environment; also added `await` to all async GitHub API calls
+
+
+Changes   +203 -37
+Requests  3 Premium (1m 16s)
+Tokens    Ôåæ 181.4k ÔÇó Ôåô 4.8k ÔÇó 152.6k (cached)

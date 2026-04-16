@@ -2,75 +2,242 @@ name: Ralph Post-Deploy Monitor
 
 on:
   deployment_status:
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: "Base URL of the deployed application"
+        required: true
+        type: string
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+env:
+  ERROR_RATE_THRESHOLD: "0.05"
+  RESPONSE_TIME_THRESHOLD: "500"
+  HEALTH_CHECK_RETRIES: "3"
+  HEALTH_CHECK_INTERVAL: "30"
 
 jobs:
   monitor-health:
-    if: github.event.deployment_status.state == 'success'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_URL: >-
+        ${{ github.event_name == 'workflow_dispatch'
+            && inputs.deployment_url
+            || 'https://metricflow-staging.example.com' }}
+      DEPLOY_ENV: >-
+        ${{ github.event_name == 'workflow_dispatch'
+            && inputs.environment
+            || 'staging' }}
     steps:
       - name: Wait for Deployment Stabilization
         run: sleep 60
-      
-      - name: Ralph Health Check
+
+      - name: Ralph Health Check with Retries
         id: health
         run: |
-          # Check health endpoint
-          HEALTH_STATUS=$(curl -s https://metricflow-staging.example.com/api/health | jq -r '.status')
-          
-          # Check error rates
-          ERROR_RATE=$(curl -s https://metricflow-staging.example.com/api/metrics/realtime | jq -r '.errorRate')
-          
-          echo "health_status=$HEALTH_STATUS" >> $GITHUB_OUTPUT
-          echo "error_rate=$ERROR_RATE" >> $GITHUB_OUTPUT
-      
+          RETRIES=${{ env.HEALTH_CHECK_RETRIES }}
+          INTERVAL=${{ env.HEALTH_CHECK_INTERVAL }}
+          HEALTH_STATUS="unhealthy"
+          PASS_COUNT=0
+          FAIL_COUNT=0
+
+          for i in $(seq 1 "$RETRIES"); do
+            echo "::group::Health check attempt $i of $RETRIES"
+            HTTP_CODE=$(curl -s -o /tmp/health_response.json -w "%{http_code}" \
+              "${DEPLOY_URL}/api/health" || echo "000")
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              STATUS=$(jq -r '.status // "unknown"' /tmp/health_response.json)
+              if [ "$STATUS" = "healthy" ]; then
+                PASS_COUNT=$((PASS_COUNT + 1))
+                echo "✅ Attempt $i: healthy (HTTP $HTTP_CODE)"
+              else
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+                echo "❌ Attempt $i: status=$STATUS (HTTP $HTTP_CODE)"
+              fi
+            else
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+              echo "❌ Attempt $i: unreachable (HTTP $HTTP_CODE)"
+            fi
+            echo "::endgroup::"
+
+            if [ "$i" -lt "$RETRIES" ]; then
+              echo "Waiting ${INTERVAL}s before next attempt..."
+              sleep "$INTERVAL"
+            fi
+          done
+
+          if [ "$PASS_COUNT" -gt 0 ]; then
+            HEALTH_STATUS="healthy"
+          fi
+
+          echo "health_status=$HEALTH_STATUS" >> "$GITHUB_OUTPUT"
+          echo "pass_count=$PASS_COUNT" >> "$GITHUB_OUTPUT"
+          echo "fail_count=$FAIL_COUNT" >> "$GITHUB_OUTPUT"
+
+          # Fetch error rate
+          ERROR_RATE=$(curl -s "${DEPLOY_URL}/api/metrics/realtime" \
+            | jq -r '.errorRate // "0"')
+          echo "error_rate=$ERROR_RATE" >> "$GITHUB_OUTPUT"
+
+      - name: Response Time Check
+        id: response_time
+        run: |
+          TOTAL_TIME=0
+          SAMPLES=3
+
+          for i in $(seq 1 "$SAMPLES"); do
+            TIME_MS=$(curl -s -o /dev/null -w "%{time_total}" \
+              "${DEPLOY_URL}/api/health" || echo "0")
+            # Convert seconds to milliseconds
+            TIME_MS=$(echo "$TIME_MS * 1000" | bc -l)
+            echo "Sample $i: ${TIME_MS}ms"
+            TOTAL_TIME=$(echo "$TOTAL_TIME + $TIME_MS" | bc -l)
+          done
+
+          AVG_TIME=$(echo "scale=2; $TOTAL_TIME / $SAMPLES" | bc -l)
+          echo "avg_response_time=$AVG_TIME" >> "$GITHUB_OUTPUT"
+          echo "Average response time: ${AVG_TIME}ms"
+
       - name: Evaluate Deployment Health
         id: evaluate
         run: |
           HEALTH="${{ steps.health.outputs.health_status }}"
           ERROR_RATE="${{ steps.health.outputs.error_rate }}"
-          
+          AVG_TIME="${{ steps.response_time.outputs.avg_response_time }}"
+          REASONS=""
+
           if [ "$HEALTH" != "healthy" ]; then
-            echo "deployment_healthy=false" >> $GITHUB_OUTPUT
-            echo "reason=Health check failed" >> $GITHUB_OUTPUT
-          elif (( $(echo "$ERROR_RATE > 0.05" | bc -l) )); then
-            echo "deployment_healthy=false" >> $GITHUB_OUTPUT
-            echo "reason=Error rate too high: $ERROR_RATE" >> $GITHUB_OUTPUT
-          else
-            echo "deployment_healthy=true" >> $GITHUB_OUTPUT
+            REASONS="Health check failed (status: $HEALTH)"
           fi
-      
+
+          if (( $(echo "$ERROR_RATE > ${{ env.ERROR_RATE_THRESHOLD }}" | bc -l) )); then
+            if [ -n "$REASONS" ]; then REASONS="$REASONS; "; fi
+            REASONS="${REASONS}Error rate ${ERROR_RATE} exceeds threshold ${{ env.ERROR_RATE_THRESHOLD }}"
+          fi
+
+          if (( $(echo "$AVG_TIME > ${{ env.RESPONSE_TIME_THRESHOLD }}" | bc -l) )); then
+            if [ -n "$REASONS" ]; then REASONS="$REASONS; "; fi
+            REASONS="${REASONS}Response time ${AVG_TIME}ms exceeds threshold ${{ env.RESPONSE_TIME_THRESHOLD }}ms"
+          fi
+
+          if [ -n "$REASONS" ]; then
+            echo "deployment_healthy=false" >> "$GITHUB_OUTPUT"
+            echo "reason=$REASONS" >> "$GITHUB_OUTPUT"
+          else
+            echo "deployment_healthy=true" >> "$GITHUB_OUTPUT"
+            echo "reason=All checks passed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Incident Issue
+        if: steps.evaluate.outputs.deployment_healthy == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🚨 Ralph: Deployment Incident – ${process.env.DEPLOY_ENV}`;
+            const body = [
+              `## Deployment Incident Report`,
+              ``,
+              `**Environment:** \`${process.env.DEPLOY_ENV}\``,
+              `**Deployment URL:** \`${process.env.DEPLOY_URL}\``,
+              `**Detected at:** ${new Date().toISOString()}`,
+              `**Triggered by:** \`${context.eventName}\``,
+              ``,
+              `### Health Metrics`,
+              `| Metric | Value | Threshold | Status |`,
+              `|--------|-------|-----------|--------|`,
+              `| Health Status | \`${{ steps.health.outputs.health_status }}\` | healthy | ${('${{ steps.health.outputs.health_status }}' === 'healthy') ? '✅' : '❌'} |`,
+              `| Error Rate | \`${{ steps.health.outputs.error_rate }}\` | ≤ ${{ env.ERROR_RATE_THRESHOLD }} | ${(parseFloat('${{ steps.health.outputs.error_rate }}') <= parseFloat('${{ env.ERROR_RATE_THRESHOLD }}')) ? '✅' : '❌'} |`,
+              `| Avg Response Time | \`${{ steps.response_time.outputs.avg_response_time }}ms\` | ≤ ${{ env.RESPONSE_TIME_THRESHOLD }}ms | ${(parseFloat('${{ steps.response_time.outputs.avg_response_time }}') <= parseFloat('${{ env.RESPONSE_TIME_THRESHOLD }}')) ? '✅' : '❌'} |`,
+              ``,
+              `### Health Check Details`,
+              `- Passed: **${{ steps.health.outputs.pass_count }}** / ${{ env.HEALTH_CHECK_RETRIES }}`,
+              `- Failed: **${{ steps.health.outputs.fail_count }}** / ${{ env.HEALTH_CHECK_RETRIES }}`,
+              ``,
+              `### Failure Reason`,
+              `> ${{ steps.evaluate.outputs.reason }}`,
+              ``,
+              `### Actions Taken`,
+              `- 🔄 Automatic rollback has been triggered`,
+              ``,
+              `---`,
+              `*Generated by Ralph Post-Deploy Monitor*`,
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['deployment', 'incident']
+            });
+
       - name: Trigger Rollback
         if: steps.evaluate.outputs.deployment_healthy == 'false'
         uses: actions/github-script@v7
         with:
           script: |
-            core.setFailed('⚠️ Ralph detected deployment issues: ${{ steps.evaluate.outputs.reason }}');
-            
-            // Trigger rollback workflow
-            github.rest.actions.createWorkflowDispatch({
+            core.setFailed(`⚠️ Ralph detected deployment issues: ${{ steps.evaluate.outputs.reason }}`);
+
+            await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'rollback.yml',
               ref: 'main',
               inputs: {
-                reason: '${{ steps.evaluate.outputs.reason }}'
+                reason: `${{ steps.evaluate.outputs.reason }}`,
+                environment: process.env.DEPLOY_ENV
               }
             });
-      
-      - name: Post Success Status
+
+      - name: Post Deployment Health Summary
         if: steps.evaluate.outputs.deployment_healthy == 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.create({
+            const title = `✅ Ralph: Deployment Health Check Passed – ${process.env.DEPLOY_ENV}`;
+            const body = [
+              `## Deployment Health Summary`,
+              ``,
+              `**Environment:** \`${process.env.DEPLOY_ENV}\``,
+              `**Deployment URL:** \`${process.env.DEPLOY_URL}\``,
+              `**Verified at:** ${new Date().toISOString()}`,
+              ``,
+              `### Health Metrics`,
+              `| Metric | Value | Threshold | Status |`,
+              `|--------|-------|-----------|--------|`,
+              `| Health Status | \`${{ steps.health.outputs.health_status }}\` | healthy | ✅ |`,
+              `| Error Rate | \`${{ steps.health.outputs.error_rate }}\` | ≤ ${{ env.ERROR_RATE_THRESHOLD }} | ✅ |`,
+              `| Avg Response Time | \`${{ steps.response_time.outputs.avg_response_time }}ms\` | ≤ ${{ env.RESPONSE_TIME_THRESHOLD }}ms | ✅ |`,
+              ``,
+              `### Health Check Details`,
+              `- Passed: **${{ steps.health.outputs.pass_count }}** / ${{ env.HEALTH_CHECK_RETRIES }}`,
+              `- Failed: **${{ steps.health.outputs.fail_count }}** / ${{ env.HEALTH_CHECK_RETRIES }}`,
+              ``,
+              `All metrics within acceptable thresholds. No action required.`,
+              ``,
+              `---`,
+              `*Generated by Ralph Post-Deploy Monitor*`,
+            ].join('\n');
+
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '✅ Ralph: Deployment Health Check Passed',
-              body: `Deployment monitoring completed successfully.
-              
-              **Health Status:** ${{ steps.health.outputs.health_status }}
-              **Error Rate:** ${{ steps.health.outputs.error_rate }}
-              
-              All metrics within acceptable thresholds.`,
-              labels: ['deployment', 'ralph-monitor']
+              title,
+              body,
+              labels: ['deployment-success']
             });
