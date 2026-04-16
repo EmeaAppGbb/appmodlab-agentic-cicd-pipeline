@@ -1,0 +1,63 @@
+ÔùÅ Read package.json
+  Ôöö 18 lines read
+
+ÔùÅ Search (glob)
+  Ôöé ".github/workflows/**/*.yml"
+  Ôöö 11 files found
+
+ÔùÅ Read approval-gates.yml
+  Ôöé .github\workflows\agentic\approval-gates.yml
+  Ôöö 77 lines read
+
+ÔùÅ Read post-deploy-monitor.yml
+  Ôöé .github\workflows\agentic\post-deploy-monitor.yml
+  Ôöö 243 lines read
+
+ÔùÅ Read release-notes.yml
+  Ôöé .github\workflows\agentic\release-notes.yml
+  Ôöö 217 lines read
+
+Now I have the full picture. The existing `post-deploy-monitor.yml` and `release-notes.yml` don't have `workflow_call` triggers, so they can't be called as reusable workflows. I'll implement the pipeline with inline steps inspired by their logic.
+
+ÔùÅ Create full-pipeline.yml +386
+  Ôöö .github\workflows\agentic\full-pipeline.yml
+
+Now let me validate the YAML syntax:
+
+ÔùÅ Validate YAML syntax (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && python -c "import
+  Ôöé yaml; yaml.safe_load(open('.github/workflows/agentic/full-pipeline.yml'));
+  Ôöé print('YAML is valid')"
+  Ôöö 2 lines...
+
+ÔùÅ Validate YAML with Node.js (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const yaml
+  Ôöé = require('yaml'); const fs = require('fs'); const doc = yaml.parse(fs.re
+  Ôöé adFileSync('.github/workflows/agentic/full-pipeline.yml','utf8'));
+  Ôöé console.log('Valid YAML'); console.log('Jobs:',
+  Ôöé Object.keys(doc.jobs).join(', ')); console.log('Trigger:', ÔÇª
+  Ôöö 23 lines...
+
+ÔùÅ Validate YAML with js-yaml (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const
+  Ôöé js_yaml = require('js-yaml'); const fs = require('fs'); const doc =
+  Ôöé js_yaml.load(fs.readFileSync('.github/workflows/agentic/full-pipeline.yml'
+  Ôöé ,'utf8')); console.log('Valid YAML'); console.log('Jobs:',
+  Ôöé Object.keys(doc.jobs).join(', ')); console.log('Trigger:', ÔÇª
+  Ôöö 7 lines...
+
+YAML is valid. The workflow has been created at `.github/workflows/agentic/full-pipeline.yml` with all 6 jobs in the correct dependency chain:
+
+1. **build** ÔåÆ checkout, setup Node 20, `npm ci`, `npm run build`
+2. **deploy-staging** ÔåÆ needs `build`, uses `staging` environment, outputs `deployment_url`
+3. **health-check** ÔåÆ needs `deploy-staging`, runs Ralph-style health checks with retries against the staging URL
+4. **release-notes** ÔåÆ needs `health-check`, generates categorized release notes from conventional commits
+5. **deploy-production** ÔåÆ needs `release-notes`, uses `production` environment (manual approval gate), simulates production deploy
+6. **post-deploy-verify** ÔåÆ needs `deploy-production`, full Ralph-style monitoring (health checks, response time, error rate evaluation, incident issue creation on failure)
+
+Permissions: `contents: write`, `deployments: write`, `issues: write`.
+
+
+Changes   +386 -0
+Requests  3 Premium (1m 42s)
+Tokens    Ôåæ 246.0k ÔÇó Ôåô 6.0k ÔÇó 206.0k (cached)
