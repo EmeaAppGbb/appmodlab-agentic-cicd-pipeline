@@ -4,65 +4,163 @@ on:
   pull_request:
     types: [labeled, opened, synchronize]
 
+permissions:
+  pull-requests: write
+  contents: read
+
 jobs:
   assess-risk:
     runs-on: ubuntu-latest
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name == 'high-risk') }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Analyze Changes
         id: changes
         run: |
-          FILES_CHANGED=$(git diff --name-only origin/main...HEAD | wc -l)
-          DB_MIGRATIONS=$(git diff --name-only origin/main...HEAD | grep -c 'migrations/' || true)
-          API_CHANGES=$(git diff --name-only origin/main...HEAD | grep -c 'packages/api/' || true)
-          
+          DIFF_FILES=$(git diff --name-only origin/main...HEAD)
+          FILES_CHANGED=$(echo "$DIFF_FILES" | grep -c '.' || true)
+          DB_MIGRATIONS=$(echo "$DIFF_FILES" | grep -c 'migrations/' || true)
+          API_CHANGES=$(echo "$DIFF_FILES" | grep -c 'packages/api/' || true)
+          DEPENDENCY_UPDATES=$(echo "$DIFF_FILES" | grep -cE '(^|/)package(-lock)?\.json$' || true)
+          INFRASTRUCTURE_CHANGES=$(echo "$DIFF_FILES" | grep -cE '(Dockerfile|bicep/)' || true)
+          WORKFLOW_CHANGES=$(echo "$DIFF_FILES" | grep -c '\.github/workflows/' || true)
+
           echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
           echo "db_migrations=$DB_MIGRATIONS" >> $GITHUB_OUTPUT
           echo "api_changes=$API_CHANGES" >> $GITHUB_OUTPUT
-      
+          echo "dependency_updates=$DEPENDENCY_UPDATES" >> $GITHUB_OUTPUT
+          echo "infrastructure_changes=$INFRASTRUCTURE_CHANGES" >> $GITHUB_OUTPUT
+          echo "workflow_changes=$WORKFLOW_CHANGES" >> $GITHUB_OUTPUT
+
       - name: Brain Risk Assessment
         id: risk
         run: |
-          # Risk scoring logic
-          RISK_SCORE=0
-          RISK_SCORE=$((RISK_SCORE + ${{ steps.changes.outputs.files_changed }} / 2))
-          RISK_SCORE=$((RISK_SCORE + ${{ steps.changes.outputs.db_migrations }} * 10))
-          RISK_SCORE=$((RISK_SCORE + ${{ steps.changes.outputs.api_changes }} * 2))
-          
-          if [ $RISK_SCORE -lt 10 ]; then
+          FILES_CHANGED=${{ steps.changes.outputs.files_changed }}
+          DB_MIGRATIONS=${{ steps.changes.outputs.db_migrations }}
+          API_CHANGES=${{ steps.changes.outputs.api_changes }}
+          DEPENDENCY_UPDATES=${{ steps.changes.outputs.dependency_updates }}
+          INFRASTRUCTURE_CHANGES=${{ steps.changes.outputs.infrastructure_changes }}
+          WORKFLOW_CHANGES=${{ steps.changes.outputs.workflow_changes }}
+
+          S_FILES=$((FILES_CHANGED / 2))
+          S_DB=$((DB_MIGRATIONS * 10))
+          S_API=$((API_CHANGES * 2))
+          S_DEPS=$((DEPENDENCY_UPDATES * 3))
+          S_INFRA=$((INFRASTRUCTURE_CHANGES * 5))
+          S_WF=$((WORKFLOW_CHANGES * 4))
+
+          RISK_SCORE=$((S_FILES + S_DB + S_API + S_DEPS + S_INFRA + S_WF))
+
+          RISK_FACTORS=""
+          [ "$FILES_CHANGED" -gt 0 ] && RISK_FACTORS="files_changed"
+          [ "$DB_MIGRATIONS" -gt 0 ] && RISK_FACTORS="${RISK_FACTORS:+$RISK_FACTORS,}db_migrations"
+          [ "$API_CHANGES" -gt 0 ] && RISK_FACTORS="${RISK_FACTORS:+$RISK_FACTORS,}api_changes"
+          [ "$DEPENDENCY_UPDATES" -gt 0 ] && RISK_FACTORS="${RISK_FACTORS:+$RISK_FACTORS,}dependency_updates"
+          [ "$INFRASTRUCTURE_CHANGES" -gt 0 ] && RISK_FACTORS="${RISK_FACTORS:+$RISK_FACTORS,}infrastructure_changes"
+          [ "$WORKFLOW_CHANGES" -gt 0 ] && RISK_FACTORS="${RISK_FACTORS:+$RISK_FACTORS,}workflow_changes"
+
+          if [ "$RISK_SCORE" -lt 10 ]; then
             RISK_LEVEL="low"
-          elif [ $RISK_SCORE -lt 25 ]; then
+          elif [ "$RISK_SCORE" -lt 25 ]; then
             RISK_LEVEL="moderate"
           else
             RISK_LEVEL="high"
           fi
-          
+
           echo "risk_score=$RISK_SCORE" >> $GITHUB_OUTPUT
           echo "risk_level=$RISK_LEVEL" >> $GITHUB_OUTPUT
-      
+          echo "risk_factors=$RISK_FACTORS" >> $GITHUB_OUTPUT
+
+          echo "s_files=$S_FILES" >> $GITHUB_OUTPUT
+          echo "s_db=$S_DB" >> $GITHUB_OUTPUT
+          echo "s_api=$S_API" >> $GITHUB_OUTPUT
+          echo "s_deps=$S_DEPS" >> $GITHUB_OUTPUT
+          echo "s_infra=$S_INFRA" >> $GITHUB_OUTPUT
+          echo "s_wf=$S_WF" >> $GITHUB_OUTPUT
+
       - name: Post Risk Assessment
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.createComment({
+            const riskLevel = '${{ steps.risk.outputs.risk_level }}';
+            const riskScore = '${{ steps.risk.outputs.risk_score }}';
+
+            const riskEmoji = riskLevel === 'high' ? '🔴' : riskLevel === 'moderate' ? '🟡' : '🟢';
+            const riskLabel = riskLevel.charAt(0).toUpperCase() + riskLevel.slice(1);
+
+            const meterLength = 10;
+            const filled = Math.min(meterLength, Math.round((parseInt(riskScore) / 50) * meterLength));
+            const meterFill = riskLevel === 'high' ? '🔴' : riskLevel === 'moderate' ? '🟡' : '🟢';
+            const riskMeter = meterFill.repeat(filled) + '⚪'.repeat(meterLength - filled);
+
+            const recommendation = riskLevel === 'high'
+              ? '⛔ Additional approval required before deployment'
+              : riskLevel === 'moderate'
+                ? '⚠️ Review recommended — proceed with caution'
+                : '✅ Standard deployment process';
+
+            const body = [
+              '## 🧠 Brain Risk Assessment',
+              '',
+              `**Risk Level:** ${riskEmoji} **${riskLabel}** (Score: ${riskScore})`,
+              '',
+              `**Risk Meter:** ${riskMeter}`,
+              '',
+              '### 📊 Risk Breakdown',
+              '',
+              '| Category | Count | Weight | Subtotal |',
+              '|---|---|---|---|',
+              `| Files Changed | ${{ steps.changes.outputs.files_changed }} | ×0.5 | ${{ steps.risk.outputs.s_files }} |`,
+              `| Database Migrations | ${{ steps.changes.outputs.db_migrations }} | ×10 | ${{ steps.risk.outputs.s_db }} |`,
+              `| API Changes | ${{ steps.changes.outputs.api_changes }} | ×2 | ${{ steps.risk.outputs.s_api }} |`,
+              `| Dependency Updates | ${{ steps.changes.outputs.dependency_updates }} | ×3 | ${{ steps.risk.outputs.s_deps }} |`,
+              `| Infrastructure Changes | ${{ steps.changes.outputs.infrastructure_changes }} | ×5 | ${{ steps.risk.outputs.s_infra }} |`,
+              `| Workflow Changes | ${{ steps.changes.outputs.workflow_changes }} | ×4 | ${{ steps.risk.outputs.s_wf }} |`,
+              `| **Total** | | | **${riskScore}** |`,
+              '',
+              `**Contributing Factors:** ${{ steps.risk.outputs.risk_factors || 'none' }}`,
+              '',
+              `**Recommendation:** ${recommendation}`,
+            ].join('\n');
+
+            const marker = '<!-- brain-risk-assessment -->';
+            const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## 🧠 Brain Risk Assessment
-              
-              **Risk Level:** ${{ steps.risk.outputs.risk_level }} (Score: ${{ steps.risk.outputs.risk_score }})
-              
-              **Analysis:**
-              - Files changed: ${{ steps.changes.outputs.files_changed }}
-              - Database migrations: ${{ steps.changes.outputs.db_migrations }}
-              - API changes: ${{ steps.changes.outputs.api_changes }}
-              
-              **Recommendation:** ${{ steps.risk.outputs.risk_level == 'high' && 'Additional approval required' || 'Standard deployment process' }}`
-            })
-      
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            const fullBody = marker + '\n' + body;
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: fullBody,
+              });
+            }
+
+            if (riskLevel === 'high') {
+              await github.rest.issues.addLabels({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: ['high-risk'],
+              });
+            }
+
       - name: Require Additional Approval
         if: steps.risk.outputs.risk_level == 'high'
         run: |

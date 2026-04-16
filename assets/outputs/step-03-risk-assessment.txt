@@ -1,0 +1,67 @@
+ÔùÅ Read risk-assessment.yml
+  Ôöé .github\workflows\agentic\risk-assessment.yml
+  Ôöö 70 lines read
+
+Now let me craft the enhanced workflow and get a quick rubber-duck review on my plan before implementing.
+
+ÔùÅ Rubber-duck Review risk workflow plan
+  Ôöé Search (grep)
+  Ôöé   Ôöé "createComment|updateComment|listComments" in *.yml (.github\workflows)
+  Ôöé   Ôöö 8 lines found
+  Ôöö Read pre-deploy-review.yml
+      Ôöé .github\workflows\agentic\pre-deploy-review.yml
+      Ôöö L200:235 (35 lines read)
+
+The critique caught important issues: self-triggering from the `labeled` event, and scoping `.github/` too broadly. I'll address those. Let me implement the enhanced workflow now.
+
+ÔùÅ Edit risk-assessment.yml +127 -29
+  Ôöö .github\workflows\agentic\risk-assessment.yml
+
+Now let me verify the file looks correct:
+
+ÔùÅ Read risk-assessment.yml
+  Ôöé .github\workflows\agentic\risk-assessment.yml
+  Ôöö 168 lines read
+
+Let me validate it's valid YAML:
+
+ÔùÅ Validate YAML syntax (shell)
+  Ôöé python -c "import yaml;
+  Ôöé yaml.safe_load(open(r'.github/workflows/agentic/risk-assessment.yml'));
+  Ôöé print('Valid YAML')"
+  Ôöö 2 lines...
+
+ÔùÅ Validate YAML with Node.js (shell)
+  Ôöé node -e "const yaml = require('js-yaml'); const fs = require('fs'); yaml.loa
+  Ôöé d(fs.readFileSync('.github/workflows/agentic/risk-assessment.yml','utf8'));
+  Ôöé console.log('Valid YAML')"
+  Ôöö 2 lines...
+
+YAML is valid. Let me commit the changes:
+
+ÔùÅ Check git diff stats (shell)
+  Ôöé git --no-pager diff --stat .github/workflows/agentic/risk-assessment.yml
+  Ôöö 3 lines...
+
+ÔùÅ Commit enhanced workflow (shell)
+  Ôöé git add .github/workflows/agentic/risk-assessment.yml && git commit -m
+  Ôöé "Enhance Brain Risk Assessment workflow to production quality
+  Ôöé
+  Ôöé - Add permissions block (pull-requests: write, contents: read)
+  Ôöé - Detect dependency updates (package.json/lock), infrastructure ÔÇª
+  Ôöö 20 lines...
+
+Done. Here's what was enhanced in the workflow:
+
+1. **Permissions**: Added `pull-requests: write` and `contents: read`
+2. **Change detection**: Now detects dependency updates (`package.json`/`package-lock.json`), infrastructure changes (`Dockerfile`/`bicep/`), and workflow changes (`.github/workflows/`)
+3. **Risk scoring**: New weighted factors ÔÇö deps ├ù3, infra ├ù5, workflows ├ù4
+4. **`risk_factors` output**: Comma-separated list of contributing categories
+5. **Detailed comment**: Breakdown table with counts/weights/subtotals, visual risk meter (­ƒƒó­ƒƒí­ƒö┤), upserted to avoid duplicate comments
+6. **High-risk label**: Adds `high-risk` label to the PR when risk is high
+7. **Bonus**: Self-trigger guard prevents infinite loops from the `labeled` event
+
+
+Changes   +127 -29
+Requests  3 Premium (3m 45s)
+Tokens    Ôåæ 475.5k ÔÇó Ôåô 9.5k ÔÇó 439.7k (cached) ÔÇó 2.2k (reasoning)
