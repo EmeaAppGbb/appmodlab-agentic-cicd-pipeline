@@ -24,6 +24,9 @@ This lab demonstrates setting up GitHub Actions workflows that integrate with SQ
 
 **Business Domain:** SaaS metrics and billing dashboard for "MetricFlow"
 
+![MetricFlow Dashboard — Active Users & Revenue Charts](assets/screenshots/01-dashboard.png)
+*The MetricFlow dashboard provides a real-time view of active users and revenue metrics.*
+
 ## Learning Objectives
 
 By completing this lab, you will:
@@ -65,6 +68,25 @@ The CI/CD pipeline is enhanced with four SQUAD-powered stages:
 3. **Release Notes** — Mouth generates markdown release notes from commit messages
 4. **Post-Deploy Monitor** — Ralph watches deployment metrics and triggers auto-rollback
 
+## Initial Application Screenshots
+
+The MetricFlow application running locally (API on port 3200, frontend on port 3201):
+
+### Dashboard — Active Users & Revenue Charts
+![MetricFlow Dashboard](assets/screenshots/01-dashboard.png)
+
+### API Health Endpoint (`/api/health`)
+![API Health](assets/screenshots/02-api-health.png)
+
+### API Metrics Endpoint (`/api/metrics`)
+![API Metrics](assets/screenshots/03-api-metrics.png)
+
+### API Billing Invoices (`/api/billing/invoices`)
+![Billing Invoices](assets/screenshots/04-api-billing-invoices.png)
+
+### API Realtime Metrics (`/api/metrics/realtime`)
+![Realtime Metrics](assets/screenshots/05-api-realtime-metrics.png)
+
 ## Lab Instructions
 
 ### Step 1: Run MetricFlow
@@ -81,6 +103,12 @@ The CI/CD pipeline is enhanced with four SQUAD-powered stages:
 2. Verify the application:
    - Frontend: http://localhost:5173
    - API: http://localhost:3000/api/health
+
+   ![API Health Endpoint](assets/screenshots/02-api-health.png)
+   *A successful startup returns a healthy status from the `/api/health` endpoint.*
+
+   ![MetricFlow Dashboard](assets/screenshots/01-dashboard.png)
+   *The frontend dashboard should display active users and revenue charts.*
 
 3. Review existing CI workflow at `.github/workflows/ci.yml`
 
@@ -207,6 +235,9 @@ The CI/CD pipeline is enhanced with four SQUAD-powered stages:
      // ... rest of code
    });
    ```
+
+   ![Realtime Metrics Endpoint](assets/screenshots/05-api-realtime-metrics.png)
+   *The `/api/metrics/realtime` endpoint returns live metrics — the faulty code above will cause intermittent failures here.*
 
 2. Push and merge (bypass reviews for testing)
 3. Deploy to staging
