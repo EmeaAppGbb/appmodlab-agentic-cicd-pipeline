@@ -1,0 +1,112 @@
+ÔùÅ List directory .github\workflows\agentic
+  Ôöö 4 files found
+
+ÔùÅ Read pre-deploy-review.yml
+  Ôöé .github\workflows\agentic\pre-deploy-review.yml
+  Ôöö 48 lines read
+
+Now let me look at the other workflow files briefly for style consistency, then design the enhanced workflow.
+
+ÔùÅ Read risk-assessment.yml
+  Ôöé .github\workflows\agentic\risk-assessment.yml
+  Ôöö 70 lines read
+
+ÔùÅ List directory packages
+  Ôöö 2 files found
+
+ÔùÅ Rubber-duck Review workflow design plan
+  Ôöé Search (grep)
+  Ôöé   Ôöé "drizzle|postgres\(|redis\(|db\.|sql`|execute\(|select\(" in *.ts
+  Ôöé   Ôöé (packages\api\src)
+  Ôöé   Ôöö No matches found
+  Ôöö Search (grep)
+      Ôöé "app\.get\(|app\.post\(|router\.|fetch\(" in *.{ts,tsx} (packages)
+      Ôöö 7 lines found
+
+Good feedback. Key adjustments: use `issues: write`, paginate file listing, scan only PR diff patches (not full files), upsert comments with a marker, use `fromJSON()` for the gate, and keep patterns high-signal. Let me implement.
+
+ÔùÅ Edit pre-deploy-review.yml +219 -29
+  Ôöö .github\workflows\agentic\pre-deploy-review.yml
+
+Now let me validate the YAML is well-formed and review the final file:
+
+ÔùÅ Read pre-deploy-review.yml
+  Ôöé .github\workflows\agentic\pre-deploy-review.yml
+  Ôöö 238 lines read
+
+ÔùÅ Validate YAML syntax (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && python -c "import
+  Ôöé yaml;
+  Ôöé yaml.safe_load(open('.github/workflows/agentic/pre-deploy-review.yml'));
+  Ôöé print('YAML is valid')"
+  Ôöö 2 lines...
+
+ÔùÅ Validate YAML with Node.js (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const yaml
+  Ôöé = require('yaml'); const fs = require('fs'); const doc = yaml.parse(fs.re
+  Ôöé adFileSync('.github/workflows/agentic/pre-deploy-review.yml', 'utf8'));
+  Ôöé console.log('YAML valid'); console.log('Jobs:', Object.keys(doc.jobs));
+  Ôöé console.log('Steps:', doc.jobs['eyes-review'].steps.map(s => s.name || ÔÇª
+  Ôöö 23 lines...
+
+ÔùÅ Validate YAML with js-yaml (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const fs =
+  Ôöé require('fs'); const js_yaml = require('js-yaml'); const doc = js_yaml.lo
+  Ôöé ad(fs.readFileSync('.github/workflows/agentic/pre-deploy-review.yml',
+  Ôöé 'utf8')); console.log('YAML valid'); console.log('Jobs:',
+  Ôöé Object.keys(doc.jobs)); console.log('Steps:', ÔÇª
+  Ôöö 7 lines...
+
+YAML is valid. Now let me check for an issue ÔÇö the template literal indentation in the markdown body will produce extra whitespace. Let me fix the indentation so the markdown renders cleanly:
+
+ÔùÅ Edit pre-deploy-review.yml +8 -7
+  Ôöö .github\workflows\agentic\pre-deploy-review.yml
+
+ÔùÅ Edit pre-deploy-review.yml +23 -21
+  Ôöö .github\workflows\agentic\pre-deploy-review.yml
+
+ÔùÅ Re-validate YAML after edits (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && node -e "const fs =
+  Ôöé require('fs'); const js_yaml = require('js-yaml'); const doc = js_yaml.lo
+  Ôöé ad(fs.readFileSync('.github/workflows/agentic/pre-deploy-review.yml',
+  Ôöé 'utf8')); console.log('YAML valid'); const steps =
+  Ôöé doc.jobs['eyes-review'].steps; steps.forEach((s,i) => console.log(i, ÔÇª
+  Ôöö 8 lines...
+
+Let me do a final review of the complete file:
+
+ÔùÅ Read pre-deploy-review.yml
+  Ôöé .github\workflows\agentic\pre-deploy-review.yml
+  Ôöö 241 lines read
+
+Now let me commit the changes:
+
+ÔùÅ Check git diff stats (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && git --no-pager diff
+  Ôöé --stat .github/workflows/agentic/pre-deploy-review.yml
+  Ôöö 3 lines...
+
+ÔùÅ Commit the enhanced workflow (shell)
+  Ôöé cd C:\code\gbb\labs\appmodlab-agentic-cicd-pipeline && git add
+  Ôöé .github/workflows/agentic/pre-deploy-review.yml && git commit -m "Enhance
+  Ôöé Eyes Pre-Deploy Review to production-quality workflow
+  Ôöé
+  Ôöé - Add permissions block (contents: read, issues: write, pull-requests: ÔÇª
+  Ôöö 24 lines...
+
+Done. Here's what the enhanced workflow now does:
+
+1. **Permissions**: `contents: read`, `issues: write`, `pull-requests: read`
+2. **Get Changed Files**: Paginated `pulls.listFiles` API call, filters to JS/TS source files
+3. **SQUAD Eyes Code Review**: Scans only **newly added lines** from PR patches for:
+   - **Security** (critical/warning): hardcoded secrets, private keys, AWS keys, SQL injection, XSS (`innerHTML`, `dangerouslySetInnerHTML`, `document.write`, `eval`)
+   - **Performance** (warning): N+1 query patterns with context-aware guards
+   - **Quality** (info/warning): `console.log`, TODO/FIXME, `debugger`
+4. **Quality score**: `100 - (critical├ù15) - (warning├ù5) - (info├ù1)`, floor at 0
+5. **PR comment**: Markdown table with severity icons, file, line, finding ÔÇö upserted via hidden marker to avoid spam
+6. **Quality gate**: Fails workflow with `exit 1` if score < 70, using `fromJSON()` for proper numeric comparison
+
+
+Changes   +250 -57
+Requests  3 Premium (4m 24s)
+Tokens    Ôåæ 607.1k ÔÇó Ôåô 11.9k ÔÇó 518.6k (cached) ÔÇó 2.2k (reasoning)
