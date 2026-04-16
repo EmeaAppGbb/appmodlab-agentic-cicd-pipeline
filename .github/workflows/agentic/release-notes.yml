@@ -4,59 +4,214 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   generate-release-notes:
     runs-on: ubuntu-latest
+    # Skip runs triggered by the release-notes commit to prevent infinite loops
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Get Commit Messages
         id: commits
         run: |
-          COMMITS=$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD)
-          echo "commits<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMITS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-      
-      - name: Mouth Generate Release Notes
+          # Find the latest semver tag (vX.Y.Z) to use as the base for both
+          # commit range and version calculation
+          BASE_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+
+          if [ -n "$BASE_TAG" ]; then
+            echo "Found base tag: $BASE_TAG"
+            RANGE="${BASE_TAG}..HEAD"
+          else
+            echo "No semver tags found, including all commits"
+            RANGE=""
+          fi
+
+          # Collect commits with subject and body (delimited per-commit)
+          # Using COMMIT_SEP to split individual commits reliably
+          DELIM="COMMITS_$(date +%s%N)"
+          echo "commits<<${DELIM}" >> "$GITHUB_OUTPUT"
+          if [ -n "$RANGE" ]; then
+            git log --pretty=format:"__COMMIT_START__%s%n%b__COMMIT_END__" "$RANGE" >> "$GITHUB_OUTPUT"
+          else
+            git log --pretty=format:"__COMMIT_START__%s%n%b__COMMIT_END__" >> "$GITHUB_OUTPUT"
+          fi
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "${DELIM}" >> "$GITHUB_OUTPUT"
+
+          # Pass base tag for version calculation
+          echo "base_tag=${BASE_TAG:-v0.0.0}" >> "$GITHUB_OUTPUT"
+
+      - name: Categorize Commits and Generate Release Notes
         id: release-notes
         run: |
-          # SQUAD Mouth would analyze commits and generate categorized release notes
-          cat > release-notes.md << 'EOF'
-          # Release Notes - $(date +%Y-%m-%d)
-          
-          ## 🚀 Features
-          - Added real-time metrics dashboard
-          - Implemented billing invoice API
-          
-          ## 🐛 Bug Fixes
-          - Fixed error rate calculation
-          - Corrected timezone handling in metrics
-          
-          ## 🔧 Improvements
-          - Optimized Dashboard component rendering
-          - Enhanced health check endpoints
-          
-          ## 📝 Changes
-          ${{ steps.commits.outputs.commits }}
-          EOF
-          
+          COMMITS="${{ steps.commits.outputs.commits }}"
+
+          # Initialize category files
+          > /tmp/breaking.md
+          > /tmp/features.md
+          > /tmp/fixes.md
+          > /tmp/perf.md
+          > /tmp/docs.md
+          > /tmp/other.md
+
+          # Parse each commit block
+          echo "$COMMITS" | awk '
+            /__COMMIT_START__/{found=1; subj=""; body=""; next}
+            /__COMMIT_END__/{
+              if (found) {
+                print subj "\t" body
+              }
+              found=0; next
+            }
+            found && subj=="" {subj=$0; next}
+            found {body=body " " $0}
+          ' | while IFS=$'\t' read -r subject body; do
+            [ -z "$subject" ] && continue
+
+            is_breaking=false
+            # Detect breaking changes: "!" before ":" or BREAKING CHANGE in body
+            if echo "$subject" | grep -qE '^[a-z]+(\(.+\))?!:'; then
+              is_breaking=true
+            fi
+            if echo "$body" | grep -qi 'BREAKING CHANGE'; then
+              is_breaking=true
+            fi
+
+            # Clean the subject: remove the prefix for display
+            clean_subject=$(echo "$subject" | sed -E 's/^[a-z]+(\([^)]*\))?\!?:[[:space:]]*//')
+            # If no prefix matched, use the full subject
+            [ -z "$clean_subject" ] && clean_subject="$subject"
+
+            if [ "$is_breaking" = true ]; then
+              echo "- $clean_subject" >> /tmp/breaking.md
+            fi
+
+            # Also categorize by type prefix
+            case "$subject" in
+              feat\(*\)*:*|feat:*)
+                echo "- $clean_subject" >> /tmp/features.md ;;
+              fix\(*\)*:*|fix:*)
+                echo "- $clean_subject" >> /tmp/fixes.md ;;
+              perf\(*\)*:*|perf:*)
+                echo "- $clean_subject" >> /tmp/perf.md ;;
+              docs\(*\)*:*|docs:*)
+                echo "- $clean_subject" >> /tmp/docs.md ;;
+              chore\(*\)*:*|chore:*|refactor\(*\)*:*|refactor:*)
+                echo "- $clean_subject" >> /tmp/other.md ;;
+              *)
+                echo "- $subject" >> /tmp/other.md ;;
+            esac
+          done
+
+          # Build the release notes markdown
+          RELEASE_DATE=$(date +%Y-%m-%d)
+          {
+            echo "# Release Notes — ${RELEASE_DATE}"
+            echo ""
+
+            if [ -s /tmp/breaking.md ]; then
+              echo "## 💥 Breaking Changes"
+              cat /tmp/breaking.md
+              echo ""
+            fi
+            if [ -s /tmp/features.md ]; then
+              echo "## 🚀 Features"
+              cat /tmp/features.md
+              echo ""
+            fi
+            if [ -s /tmp/fixes.md ]; then
+              echo "## 🐛 Bug Fixes"
+              cat /tmp/fixes.md
+              echo ""
+            fi
+            if [ -s /tmp/perf.md ]; then
+              echo "## ⚡ Performance"
+              cat /tmp/perf.md
+              echo ""
+            fi
+            if [ -s /tmp/docs.md ]; then
+              echo "## 📝 Documentation"
+              cat /tmp/docs.md
+              echo ""
+            fi
+            if [ -s /tmp/other.md ]; then
+              echo "## 🔧 Other Changes"
+              cat /tmp/other.md
+              echo ""
+            fi
+          } > release-notes.md
+
+          echo "Generated release notes:"
           cat release-notes.md
-      
-      - name: Create Release
+
+          # Set flags for version bump logic
+          HAS_BREAKING=false
+          HAS_FEATURES=false
+          [ -s /tmp/breaking.md ] && HAS_BREAKING=true
+          [ -s /tmp/features.md ] && HAS_FEATURES=true
+
+          echo "has_breaking=${HAS_BREAKING}" >> "$GITHUB_OUTPUT"
+          echo "has_features=${HAS_FEATURES}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine Next Version
+        id: version
+        run: |
+          BASE_TAG="${{ steps.commits.outputs.base_tag }}"
+          HAS_BREAKING="${{ steps.release-notes.outputs.has_breaking }}"
+          HAS_FEATURES="${{ steps.release-notes.outputs.has_features }}"
+
+          # Parse current semver from base tag
+          VERSION="${BASE_TAG#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          if [ "$HAS_BREAKING" = "true" ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$HAS_FEATURES" = "true" ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Bumping ${BASE_TAG} → ${NEW_TAG}"
+          echo "new_tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const notes = fs.readFileSync('release-notes.md', 'utf8');
-            
-            github.rest.repos.createRelease({
+            const tag = '${{ steps.version.outputs.new_tag }}';
+
+            await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: `v${Date.now()}`,
-              name: `Release ${new Date().toISOString().split('T')[0]}`,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name: `Release ${tag}`,
               body: notes,
-              draft: true
+              draft: false
             });
+
+            console.log(`Created release ${tag}`);
+
+      - name: Commit Release Notes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add release-notes.md
+          # Use [skip ci] to prevent this commit from triggering another workflow run
+          git commit -m "docs: update release notes for ${{ steps.version.outputs.new_tag }} [skip ci]" || echo "No changes to commit"
+          git push
