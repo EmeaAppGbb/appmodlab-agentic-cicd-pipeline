@@ -306,6 +306,61 @@ Risk Score = (files_changed / 2) +
 
 ---
 
+## Solution Walkthrough
+
+The complete solution is available on the `solution-final` branch with individual step tags for easy navigation.
+
+### Branch & Tags
+
+| Tag | Description |
+|-----|-------------|
+| `step-01-squad-init` | Initialize Squad workspace with agents, skills, and workflows |
+| `step-02-eyes-review-gate` | Enhanced Eyes pre-deploy review with security, performance, and quality scanning |
+| `step-03-risk-assessment` | Production-quality Brain risk assessment with weighted scoring and visual risk meter |
+| `step-04-approval-gates` | Reusable approval gates workflow with standard, enhanced, and high-risk paths |
+| `step-05-release-notes` | Mouth release notes with conventional commit parsing and semver calculation |
+| `step-06-post-deploy-monitor` | Ralph post-deploy monitor with configurable thresholds and retry logic |
+| `step-07-auto-rollback` | Automatic rollback workflow with deployment state management and incident tracking |
+| `step-08-full-pipeline` | Full pipeline orchestrating build → staging → health check → release → production → verify |
+| `step-09-rollback-test` | Rollback test script with health threshold validation and faulty deployment simulation |
+| `step-10-squad-status` | Final Squad status verification |
+
+### Tools Used
+
+- **GitHub Copilot CLI** (`gh copilot`): Used for all workflow file creation and enhancement (Steps 02–09)
+- **Squad CLI** (`npx @bradygaster/squad-cli`): Used for workspace initialization (`init`), team roles inspection (`roles`), agent hiring (`hire`), and status verification (`status`)
+
+### How to Explore
+
+```bash
+# Checkout the full solution
+git checkout solution-final
+
+# Or explore a specific step
+git checkout step-02-eyes-review-gate
+
+# View CLI outputs for any step
+cat assets/outputs/step-02-eyes-review-gate.txt
+```
+
+### Key Workflows Created
+
+1. **`.github/workflows/agentic/pre-deploy-review.yml`** — Eyes reviews PRs for security patterns (hardcoded secrets, SQL injection, XSS), performance issues, and code quality. Computes quality score and fails if < 70.
+
+2. **`.github/workflows/agentic/risk-assessment.yml`** — Brain analyzes changesets with weighted scoring: files changed (/2), DB migrations (×10), API changes (×2), dependency updates (×3), infrastructure changes (×5), workflow changes (×4). Posts detailed breakdown with visual risk meter.
+
+3. **`.github/workflows/agentic/approval-gates.yml`** — Reusable workflow with three deployment paths based on risk level. High-risk deploys require manual approval via GitHub environment protection rules.
+
+4. **`.github/workflows/agentic/release-notes.yml`** — Mouth parses conventional commits, categorizes into Features/Fixes/Performance/Docs/Breaking Changes, calculates semver, and creates GitHub releases.
+
+5. **`.github/workflows/agentic/post-deploy-monitor.yml`** — Ralph monitors health with configurable thresholds (error rate < 5%, response time < 500ms), retries, and triggers rollback on failure.
+
+6. **`.github/workflows/rollback.yml`** — Automatic rollback with deployment state management, health verification, and incident issue creation.
+
+7. **`.github/workflows/agentic/full-pipeline.yml`** — Orchestrates the complete flow: build → deploy staging → health check → release notes → deploy production → post-deploy verify.
+
+---
+
 **Estimated Duration:** 4-6 hours  
 **Difficulty:** Intermediate  
 **Category:** Cross-Cutting / End-to-End
