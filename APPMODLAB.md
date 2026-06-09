@@ -11,7 +11,7 @@ modernizationTools: []
 agenticTools: ["SQUAD"]
 tags: ["cicd", "github-actions", "deployment-automation", "risk-assessment", "auto-rollback"]
 extensions: ["github.copilot"]
-thumbnail: ""
+thumbnail: "https://raw.githubusercontent.com/EmeaAppGbb/appmodlab-agentic-cicd-pipeline/main/assets/thumbnail-gpt-image.png"
 video: ""
 version: "1.0.0"
 ---
